@@ -3,7 +3,7 @@ import datetime as dt
 import uuid
 from .config import FEED_VERSION, FEED_REFERENCE, FEED_TITLE, JE_DEALER_ID, JE_DEALER_NAME
 
-def build_james_xml(items:list) -> bytes:
+def build_james_xml(items: list) -> bytes:
     if not JE_DEALER_ID or not JE_DEALER_NAME:
         raise SystemExit("JE_DEALER_ID and JE_DEALER_NAME are required env vars.")
 
@@ -24,23 +24,28 @@ def build_james_xml(items:list) -> bytes:
 
     for it in items:
         auto = SubElement(listings, "automobile")
-        SubElement(auto, "reference").text = str(uuid.uuid4()))
-        SubElement(auto, "title").text = it.get("title","")
-        SubElement(auto, "url").text = it.get("url","")
-        SubElement(auto, "price_on_request").text = "yes"
-        SubElement(auto, "price")
+        SubElement(auto, "reference").text = str(uuid.uuid4())
+        SubElement(auto, "title").text = it.get("title", "")
+        SubElement(auto, "url").text = it.get("url", "")
 
-        SubElement(auto, "make").text = it.get("brand","")
-        SubElement(auto, "model").text = it.get("model","")
-        SubElement(auto, "year").text = it.get("year","")
-        SubElement(auto, "mileage").text = it.get("mileage","")
+        # price
+        SubElement(auto, "price_on_request").text = "yes"
+        SubElement(auto, "price")  # left empty when price_on_request=yes
+
+        # details
+        SubElement(auto, "make").text = it.get("brand", "")
+        SubElement(auto, "model").text = it.get("model", "")
+        SubElement(auto, "year").text = it.get("year", "")
+        SubElement(auto, "mileage").text = it.get("mileage", "")
         if it.get("transmission"):
             SubElement(auto, "transmission").text = it["transmission"]
         if it.get("vin"):
             SubElement(auto, "vin").text = it["vin"]
 
-        SubElement(auto, "description").text = it.get("description","")
+        # description
+        SubElement(auto, "description").text = it.get("description", "")
 
+        # media
         media = SubElement(auto, "media")
         for im in it.get("images", [])[:40]:
             img = SubElement(media, "image")
