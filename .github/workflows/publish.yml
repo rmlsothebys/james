@@ -8,11 +8,15 @@ on:
 
 permissions:
   contents: write
-  pages: write
-  id-token: write
+  pages: write      # necesar pentru deploy pe Pages
+  id-token: write   # necesar pentru deploy pe Pages
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
 
 jobs:
-  build-and-publish:
+  build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -44,10 +48,24 @@ jobs:
           python -m app.main
           ls -l JamesEdition_feed_${{ secrets.JE_DEALER_ID }}*.xml
 
-      - name: Upload to GitHub Pages artifact
+      # 1) Pregătește Pages
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      # 2) Împachetează ce vrem să publicăm
+      - name: Upload artifact for Pages
         uses: actions/upload-pages-artifact@v3
         with:
           path: .
 
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      # 3) Publică pe Pages (pasul care lipsea în run-ul tău)
       - name: Deploy to GitHub Pages
+        id: deployment
         uses: actions/deploy-pages@v4
