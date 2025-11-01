@@ -24,6 +24,7 @@ def run():
     with open(outfile, "wb") as f:
         f.write(xml_bytes)
     print("Wrote feed:", outfile)
+    print(open(outfile, "rb").read(300))
 
     s3_url = upload_to_s3(outfile, object_name=outfile)
     if s3_url:
