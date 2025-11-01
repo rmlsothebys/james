@@ -7,9 +7,9 @@ on:
     - cron: "11 0,6,12,18 * * *"
 
 permissions:
-  contents: write     # necesar pt commit/push
-  pages: write        # necesar pt Pages
-  id-token: write     # necesar pt Pages
+  pages: write
+  id-token: write
+  contents: read
 
 concurrency:
   group: "pages"
@@ -21,9 +21,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0            # necesar ca să putem commit/push cu istoric
-          persist-credentials: true # GITHUB_TOKEN pt git push
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -35,7 +32,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Build feed
+      - name: Build feed (makes the XML)
         env:
           JE_DEALER_ID: ${{ secrets.JE_DEALER_ID }}
           JE_DEALER_NAME: ${{ secrets.JE_DEALER_NAME }}
@@ -51,23 +48,7 @@ jobs:
           python -m app.main
           ls -l JamesEdition_feed_${{ secrets.JE_DEALER_ID }}*.xml
 
-      # --- RAW link stabil: commit + push XML în repo ---
-      - name: Configure Git for commit
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
-      - name: Commit XML to repo
-        run: |
-          git add JamesEdition_feed_${{ secrets.JE_DEALER_ID }}.xml
-          git commit -m "Update feed XML" || echo "No changes to commit"
-
-      - name: Push XML to main
-        run: |
-          git push origin HEAD:main
-
-      # --- PAGES: publică DOAR XML-ul ca site (opțional) ---
+      # Publicăm DOAR fișierul XML pe Pages (fără push în repo)
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
