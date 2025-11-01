@@ -7,9 +7,9 @@ on:
     - cron: "11 0,6,12,18 * * *"
 
 permissions:
-  contents: write
-  pages: write
-  id-token: write
+  contents: write     # necesar pt commit/push
+  pages: write        # necesar pt Pages
+  id-token: write     # necesar pt Pages
 
 concurrency:
   group: "pages"
@@ -21,6 +21,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0            # necesar ca să putem commit/push cu istoric
+          persist-credentials: true # GITHUB_TOKEN pt git push
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -48,20 +51,26 @@ jobs:
           python -m app.main
           ls -l JamesEdition_feed_${{ secrets.JE_DEALER_ID }}*.xml
 
-      # (Opțional, dar util): păstrează XML în repo pentru RAW link stabil
-      - name: Commit XML to repo
+      # --- RAW link stabil: commit + push XML în repo ---
+      - name: Configure Git for commit
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Commit XML to repo
+        run: |
           git add JamesEdition_feed_${{ secrets.JE_DEALER_ID }}.xml
           git commit -m "Update feed XML" || echo "No changes to commit"
-          git push
 
-      # 1) Setup Pages
+      - name: Push XML to main
+        run: |
+          git push origin HEAD:main
+
+      # --- PAGES: publică DOAR XML-ul ca site (opțional) ---
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
-      # 2) Upload artifact (doar XML-ul!) pentru Pages
       - name: Upload artifact for Pages (XML only)
         uses: actions/upload-pages-artifact@v3
         with:
@@ -74,7 +83,6 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      # 3) Deploy to GitHub Pages
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
