@@ -3,11 +3,19 @@ import datetime as dt
 import uuid
 from .config import FEED_VERSION, FEED_REFERENCE, FEED_TITLE, JE_DEALER_ID, JE_DEALER_NAME
 
+def _empty(tag, parent):
+    el = SubElement(parent, tag)
+    el.text = ""
+    return el
+
 def build_james_xml(items: list) -> bytes:
     if not JE_DEALER_ID or not JE_DEALER_NAME:
         raise SystemExit("JE_DEALER_ID and JE_DEALER_NAME are required env vars.")
 
+    # root
     root = Element("jamesedition_feed", {"version": FEED_VERSION})
+
+    # feed_information
     fi = SubElement(root, "feed_information")
     SubElement(fi, "reference").text = FEED_REFERENCE
     SubElement(fi, "title").text = FEED_TITLE
@@ -16,39 +24,53 @@ def build_james_xml(items: list) -> bytes:
     SubElement(fi, "created").text = now
     SubElement(fi, "updated").text = now
 
+    # dealer  (ID numeric + nume)
     dealer = SubElement(root, "dealer")
-    SubElement(dealer, "name").text = JE_DEALER_NAME
-    SubElement(dealer, "id").text = str(JE_DEALER_ID)
+    SubElement(dealer, "id").text = str(JE_DEALER_ID)     # ← ID numeric JE
+    SubElement(dealer, "name").text = JE_DEALER_NAME      # ← nume dealer
 
-    listings = SubElement(root, "listings")
-
+    # adverts (Cars schema)
+    adverts = SubElement(root, "adverts")
     for it in items:
-        auto = SubElement(listings, "automobile")
-        SubElement(auto, "reference").text = str(uuid.uuid4())
-        SubElement(auto, "title").text = it.get("title", "")
-        SubElement(auto, "url").text = it.get("url", "")
+        adv = SubElement(adverts, "advert", {
+            "reference": str(uuid.uuid4()),   # referință unică per anunț
+            "category": "car"
+        })
 
-        # price
-        SubElement(auto, "price_on_request").text = "yes"
-        SubElement(auto, "price")  # left empty when price_on_request=yes
+        # Required generice
+        SubElement(adv, "preowned").text = "yes"     # mașini folosite
+        SubElement(adv, "type").text = "sale"        # vânzare
 
-        # details
-        SubElement(auto, "make").text = it.get("brand", "")
-        SubElement(auto, "model").text = it.get("model", "")
-        SubElement(auto, "year").text = it.get("year", "")
-        SubElement(auto, "mileage").text = it.get("mileage", "")
-        if it.get("transmission"):
-            SubElement(auto, "transmission").text = it["transmission"]
-        if it.get("vin"):
-            SubElement(auto, "vin").text = it["vin"]
+        # detalii auto
+        SubElement(adv, "brand").text = it.get("brand","") or ""
+        SubElement(adv, "model").text = it.get("model","") or ""
+        SubElement(adv, "year").text = it.get("year","") or ""
 
-        # description
-        SubElement(auto, "description").text = it.get("description", "")
+        # preț
+        SubElement(adv, "price_on_request").text = "yes"
+        # când POR=yes, <price> trebuie să existe; îl lăsăm empty-closed cu atributele cerute
+        price = SubElement(adv, "price", {"currency":"USD", "vat_included":"VAT Excluded"})
+        price.text = ""  # empty
 
-        # media
-        media = SubElement(auto, "media")
+        # location — toate 5 taguri trebuie să existe (pot rămâne goale -> JE folosește locația dealerului)
+        loc = SubElement(adv, "location")
+        _empty("country", loc)
+        _empty("region", loc)
+        _empty("city", loc)
+        _empty("zip", loc)
+        _empty("address", loc)
+
+        # headline (obligatoriu) + description (opțional)
+        SubElement(adv, "headline").text = it.get("title","") or ""
+        SubElement(adv, "description").text = it.get("description","") or ""
+
+        # media — structură corectă: <media><image><image_url>...</image_url></image>...</media>
+        media = SubElement(adv, "media")
         for im in it.get("images", [])[:40]:
             img = SubElement(media, "image")
-            img.text = im
+            SubElement(img, "image_url").text = im
+
+        # URL listing (pentru referință)
+        # JE nu are un tag standard "url" în schema Cars; dacă vrei să-l păstrezi, îl punem în <description> deja.
 
     return tostring(root, encoding="utf-8")
