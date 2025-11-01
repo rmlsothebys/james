@@ -7,13 +7,7 @@ on:
     - cron: "11 0,6,12,18 * * *"
 
 permissions:
-  pages: write
-  id-token: write
-  contents: read
-
-concurrency:
-  group: "pages"
-  cancel-in-progress: false
+  contents: write  # necesar ca să poată face commit/push
 
 jobs:
   build:
@@ -21,6 +15,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0            # necesar pt commit & push
+          persist-credentials: true # folosește GITHUB_TOKEN
+
+      - name: Show branch (debug)
+        run: echo "BRANCH=${{ github.ref_name }}"
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -45,25 +45,23 @@ jobs:
           S3_PREFIX: ${{ secrets.S3_PREFIX }}
           S3_ENDPOINT_URL: ${{ secrets.S3_ENDPOINT_URL }}
         run: |
+          set -e
           python -m app.main
           ls -l JamesEdition_feed_${{ secrets.JE_DEALER_ID }}*.xml
 
-      # Publicăm DOAR fișierul XML pe Pages (fără push în repo)
-      - name: Setup Pages
-        uses: actions/configure-pages@v5
+      - name: Configure Git for commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - name: Upload artifact for Pages (XML only)
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: ./JamesEdition_feed_${{ secrets.JE_DEALER_ID }}.xml
+      - name: Commit XML to repo
+        run: |
+          set -e
+          git add JamesEdition_feed_${{ secrets.JE_DEALER_ID }}.xml
+          git commit -m "Update feed XML" || echo "No changes to commit"
 
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Push XML to current branch
+        run: |
+          set -e
+          git push origin HEAD:${{ github.ref_name }}
