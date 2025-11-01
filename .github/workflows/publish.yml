@@ -47,6 +47,17 @@ jobs:
         run: |
           python -m app.main
           ls -l JamesEdition_feed_${{ secrets.JE_DEALER_ID }}*.xml
+                - name: Commit XML to repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add JamesEdition_feed_${{ secrets.JE_DEALER_ID }}.xml
+          git commit -m "Update feed XML" || echo "No changes to commit"
+
+      - name: Push XML to main
+        run: |
+          git push
+
 
       # 1) Pregătește Pages
       - name: Setup Pages
