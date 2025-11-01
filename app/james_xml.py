@@ -1,81 +1,103 @@
 from xml.etree.ElementTree import Element, SubElement, tostring
 import datetime as dt
 import uuid
-from .config import FEED_VERSION, FEED_REFERENCE, FEED_TITLE, JE_DEALER_ID, JE_DEALER_NAME
 
-def _empty(tag, parent):
-    el = SubElement(parent, tag)
-    el.text = ""
-    return el
+# importă din config valorile necesare
+from .config import (
+    FEED_VERSION,
+    FEED_REFERENCE,
+    FEED_TITLE,
+    JE_DEALER_ID,
+    JE_DEALER_NAME,
+)
 
-def _txt(val: str) -> str:
+def _txt(val) -> str:
+    """Convertește în string și elimină None."""
     return "" if val is None else str(val)
 
+def _add_text(parent, tag, text=""):
+    el = SubElement(parent, tag)
+    el.text = _txt(text)
+    return el
+
 def build_james_xml(items: list) -> bytes:
+    """
+    Construcție feed JamesEdition (Cars) conform ghidului:
+    - Rădăcină: <jameslist_feed version="3.0">
+    - Secțiuni: feed_information, dealer, adverts/advert(category="car")
+    - Câmpuri required într-un <advert> (cel puțin): preowned, type, brand, model, year,
+      price_on_request, price (prezent chiar dacă gol), location (country/region/city/zip/address),
+      headline, media/image/image_url.
+    """
     if not JE_DEALER_ID or not JE_DEALER_NAME:
         raise SystemExit("JE_DEALER_ID and JE_DEALER_NAME are required env vars.")
 
-    # Root must be jameslist_feed (per JamesEdition guidelines)
-    root = Element("jameslist_feed", {"version": _txt(FEED_VERSION)})
+    # 1) root
+    root = Element("jameslist_feed", {"version": _txt(FEED_VERSION or "3.0")})
 
-    # feed_information
+    # 2) feed_information
     fi = SubElement(root, "feed_information")
-    SubElement(fi, "reference").text = _txt(FEED_REFERENCE)
-    SubElement(fi, "title").text = _txt(FEED_TITLE)
+    _add_text(fi, "reference", FEED_REFERENCE or "BAT-unsold")
+    _add_text(fi, "title", FEED_TITLE or "BaT Unsold importer")
     now = dt.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-    SubElement(fi, "description").text = "Automated import of unsold Bring a Trailer lots (for our inventory)"
-    SubElement(fi, "created").text = now
-    SubElement(fi, "updated").text = now
+    _add_text(fi, "description", "Automated import of unsold Bring a Trailer lots (for our inventory)")
+    _add_text(fi, "created", now)
+    _add_text(fi, "updated", now)
 
-    # dealer
+    # 3) dealer
     dealer = SubElement(root, "dealer")
-    SubElement(dealer, "id").text = _txt(JE_DEALER_ID)
-    SubElement(dealer, "name").text = _txt(JE_DEALER_NAME)
+    _add_text(dealer, "id", JE_DEALER_ID)
+    _add_text(dealer, "name", JE_DEALER_NAME)
 
-    # adverts
+    # 4) adverts
     adverts = SubElement(root, "adverts")
-    for it in items or []:
+
+    for it in (items or []):
+        # asigură-te că avem dict pentru location
+        loc_in = it.get("location") or {}
+        if not isinstance(loc_in, dict):
+            loc_in = {}
+
         adv = SubElement(adverts, "advert", {
             "reference": str(uuid.uuid4()),
-            "category": "car"
+            "category": "car",
         })
 
-        # required, generic
-        SubElement(adv, "preowned").text = "yes"
-        SubElement(adv, "type").text = "sale"
+        # required generic
+        _add_text(adv, "preowned", "yes")
+        _add_text(adv, "type", "sale")
 
-        # core vehicle fields (required)
-        SubElement(adv, "brand").text = _txt(it.get("brand", ""))
-        SubElement(adv, "model").text = _txt(it.get("model", ""))
-        SubElement(adv, "year").text = _txt(it.get("year", ""))
+        # required core vehicle fields
+        _add_text(adv, "brand", it.get("brand", ""))
+        _add_text(adv, "model", it.get("model", ""))
+        _add_text(adv, "year", it.get("year", ""))
 
-        # price: POR=yes + present <price .../> (empty)
-        SubElement(adv, "price_on_request").text = "yes"
+        # price block: POR=yes + <price .../> prezent chiar dacă gol
+        _add_text(adv, "price_on_request", "yes")
         price = SubElement(adv, "price", {"currency": "USD", "vat_included": "VAT Excluded"})
-        price.text = ""
+        price.text = ""  # empty-closed
 
-        # location 
-loc_data = it.get("location", {}) or {}
-loc = SubElement(adv, "location")
-SubElement(loc, "country").text = loc_data.get("country", "")
-SubElement(loc, "region").text = loc_data.get("region", "")
-SubElement(loc, "city").text = loc_data.get("city", "")
-SubElement(loc, "zip").text = loc_data.get("zip", "")
-SubElement(loc, "address").text = loc_data.get("address", "")
-
+        # required location: toate cele 5 tag-uri trebuie să existe
+        loc = SubElement(adv, "location")
+        _add_text(loc, "country", loc_in.get("country", ""))
+        _add_text(loc, "region",  loc_in.get("region", ""))
+        _add_text(loc, "city",    loc_in.get("city", ""))
+        _add_text(loc, "zip",     loc_in.get("zip", ""))
+        _add_text(loc, "address", loc_in.get("address", ""))
 
         # headline (required) + description
-        SubElement(adv, "headline").text = _txt(it.get("title", ""))
-        SubElement(adv, "description").text = _txt(it.get("description", ""))
+        _add_text(adv, "headline", it.get("title", ""))
+        _add_text(adv, "description", it.get("description", ""))
 
-        # media structure: media/image/image_url
+        # media: image/image_url (doar URL-urile deja filtrate în scraper)
         media = SubElement(adv, "media")
         for im in (it.get("images") or [])[:40]:
             img = SubElement(media, "image")
-            SubElement(img, "image_url").text = _txt(im)
+            _add_text(img, "image_url", im)
 
-        # optional extras (cars-specific) can be added later:
-        # if it.get("vin"): SubElement(adv, "vin").text = _txt(it["vin"])
-        # if it.get("mileage"): SubElement(adv, "mileage").text = _txt(it["mileage"])
+        # (opțional) câmpuri cars-specific se pot adăuga ulterior:
+        # if it.get("vin"): _add_text(adv, "vin", it["vin"])
+        # if it.get("mileage"): _add_text(adv, "mileage", it["mileage"])
+        # if it.get("transmission"): _add_text(adv, "gearbox", it["transmission"])
 
     return tostring(root, encoding="utf-8")
