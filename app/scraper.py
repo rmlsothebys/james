@@ -89,13 +89,22 @@ def parse_listing(url):
     mt = re.search(r"\b(manual|automatic|semi-automatic|dual-clutch)\b", text_blobs, re.I)
     if mt: transmission = mt.group(1).lower()
 
+        # images: acceptă doar fotografii reale, nu icoane SVG / assets de temă
     imgs = []
     for img in s.select("img"):
         src = img.get("src") or img.get("data-src") or ""
-        if src.startswith("http") and "avatar" not in src and "gravatar" not in src:
+        if not src.startswith("http"):
+            continue
+        url_no_q = src.split("?", 1)[0].lower()
+        # acceptă doar extensii foto
+        is_photo = url_no_q.endswith((".jpg", ".jpeg", ".png", ".webp"))
+        # exclude icoane / assets de temă
+        is_theme_asset = "/themes/" in url_no_q or url_no_q.endswith(".svg")
+        if is_photo and not is_theme_asset:
             if src not in imgs:
                 imgs.append(src)
     imgs = imgs[:40]
+
 
     desc = ""
     body = s.find("article") or s.find("div", class_=re.compile("content|body", re.I))
