@@ -54,13 +54,15 @@ def build_james_xml(items: list) -> bytes:
         price = SubElement(adv, "price", {"currency": "USD", "vat_included": "VAT Excluded"})
         price.text = ""
 
-        # location (all 5 tags must exist; can be empty)
-        loc = SubElement(adv, "location")
-        _empty("country", loc)
-        _empty("region", loc)
-        _empty("city", loc)
-        _empty("zip", loc)
-        _empty("address", loc)
+        # location 
+loc_data = it.get("location", {}) or {}
+loc = SubElement(adv, "location")
+SubElement(loc, "country").text = loc_data.get("country", "")
+SubElement(loc, "region").text = loc_data.get("region", "")
+SubElement(loc, "city").text = loc_data.get("city", "")
+SubElement(loc, "zip").text = loc_data.get("zip", "")
+SubElement(loc, "address").text = loc_data.get("address", "")
+
 
         # headline (required) + description
         SubElement(adv, "headline").text = _txt(it.get("title", ""))
