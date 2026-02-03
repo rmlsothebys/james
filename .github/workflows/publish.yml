@@ -55,11 +55,16 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - name: Commit XML to repo
-        run: |
-          set -e
-          git add JamesEdition_feed_${{ secrets.JE_DEALER_ID }}.xml
-          git commit -m "Update feed XML" || echo "No changes to commit"
+      - name: Commit XML + inventory to repo
+  run: |
+    git status --porcelain
+    ls -la data || true
+    echo "Inventory preview:"
+    head -c 200 data/inventory.json || true
+    echo ""
+
+    git add JamesEdition_feed_105029.xml data/inventory.json
+    git commit -m "Update feed XML + inventory" || echo "No changes"
 
       - name: Push XML to current branch
         run: |
