@@ -2,6 +2,8 @@ from xml.etree.ElementTree import Element, SubElement, tostring
 import datetime as dt
 import uuid
 
+from .inventory import load_inventory, save_inventory, upsert_bat_cars  # <-- ADAUGĂ ASTA
+
 # importă din config valorile necesare
 from .config import (
     FEED_VERSION,
@@ -31,6 +33,13 @@ def build_james_xml(items: list) -> bytes:
     """
     if not JE_DEALER_ID or not JE_DEALER_NAME:
         raise SystemExit("JE_DEALER_ID and JE_DEALER_NAME are required env vars.")
+            # --- STATEFUL INVENTORY (nu mai pierdem masinile intre rulări) ---
+    inv = load_inventory()
+    inv = upsert_bat_cars(inv, items or [])
+    save_inventory(inv)
+
+    # Generăm feed-ul din TOT inventory-ul activ, nu doar din ce am găsit azi
+    items = [x for x in inv.values() if x.get("status") == "active"]
 
     # 1) root
     root = Element("jameslist_feed", {"version": _txt(FEED_VERSION or "3.0")})
@@ -58,10 +67,19 @@ def build_james_xml(items: list) -> bytes:
         if not isinstance(loc_in, dict):
             loc_in = {}
 
+        # reference STABIL (altfel JamesEdition vede anunturi noi la fiecare run)
+        ref = (
+            it.get("external_id")  # cel mai bun (din inventory)
+            or (f"BAT-{it.get('id')}" if it.get("id") else None)  # dacă ai id BAT
+            or it.get("url")  # fallback stabil dacă ai URL
+            or str(uuid.uuid4())  # ultim fallback
+        )
+
         adv = SubElement(adverts, "advert", {
-            "reference": str(uuid.uuid4()),
+            "reference": _txt(ref),
             "category": "car",
         })
+
 
         # required generic
         _add_text(adv, "preowned", "yes")
