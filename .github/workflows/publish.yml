@@ -15,8 +15,9 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout (main)
+      - name: Checkout main
         uses: actions/checkout@v4
         with:
           ref: main
@@ -28,7 +29,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install deps
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
@@ -37,59 +38,44 @@ jobs:
         run: |
           python -m playwright install --with-deps chromium
 
-      - name: Build feed (makes the XML)
+      - name: Build feed (scrape + XML)
         env:
           JE_DEALER_ID: ${{ secrets.JE_DEALER_ID }}
           JE_DEALER_NAME: ${{ secrets.JE_DEALER_NAME }}
           FEED_TITLE: ${{ secrets.FEED_TITLE }}
           FEED_REFERENCE: ${{ secrets.FEED_REFERENCE }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
-          S3_BUCKET: ${{ secrets.S3_BUCKET }}
-          S3_PREFIX: ${{ secrets.S3_PREFIX }}
-          S3_ENDPOINT_URL: ${{ secrets.S3_ENDPOINT_URL }}
         run: |
           set -e
           python -m app.main
           ls -l JamesEdition_feed_${{ secrets.JE_DEALER_ID }}*.xml
-          ls -l data/inventory.json || true
+          ls -l data/inventory.json
 
-      - name: Configure Git
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
-            - name: Push artifacts to generated-feed branch
+      - name: Push artifacts to generated-feed branch
         run: |
           set -e
+
           BRANCH="generated-feed"
           OUTDIR=".out-feed"
 
-          # configurează git identity
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # asigură că avem origin
           git fetch origin
 
-          # creează un worktree separat pentru branch-ul de output
           rm -rf "$OUTDIR"
+
           if git show-ref --verify --quiet "refs/remotes/origin/$BRANCH"; then
             git worktree add "$OUTDIR" "origin/$BRANCH"
           else
             git worktree add -b "$BRANCH" "$OUTDIR"
           fi
 
-          # copiem fișierele generate în worktree-ul de output
           mkdir -p "$OUTDIR/data"
-          cp -f JamesEdition_feed_${{ secrets.JE_DEALER_ID }}*.xml "$OUTDIR/" || true
-          cp -f data/inventory.json "$OUTDIR/data/inventory.json" || true
 
-          # commit + push din worktree-ul de output
+          cp -f JamesEdition_feed_${{ secrets.JE_DEALER_ID }}*.xml "$OUTDIR/"
+          cp -f data/inventory.json "$OUTDIR/data/inventory.json"
+
           cd "$OUTDIR"
           git add -A
           git commit -m "Update feed XML + inventory" || echo "No changes"
           git push origin HEAD:$BRANCH
-
