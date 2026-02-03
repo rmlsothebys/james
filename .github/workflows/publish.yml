@@ -1,7 +1,6 @@
 name: Publish JamesEdition Feed
 
 on:
-  push:
   workflow_dispatch:
   schedule:
     - cron: "11 0,6,12,18 * * *"
@@ -9,18 +8,20 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: publish-jamesedition-feed
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout (main)
         uses: actions/checkout@v4
         with:
+          ref: main
           fetch-depth: 0
           persist-credentials: true
-
-      - name: Show branch (debug)
-        run: echo "BRANCH=${{ github.ref_name }}"
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -54,29 +55,30 @@ jobs:
           ls -l JamesEdition_feed_${{ secrets.JE_DEALER_ID }}*.xml
           ls -l data/inventory.json || true
 
-      - name: Configure Git for commit
+      - name: Configure Git
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - name: Commit XML + inventory to repo
+      - name: Push artifacts to generated-feed branch
         run: |
           set -e
-          git status --porcelain
-          ls -la data || true
-          echo "Inventory preview:"
-          head -c 200 data/inventory.json || true
-          echo ""
+          BRANCH="generated-feed"
 
-          # adaugă XML-ul generat + inventory
+          # asigură că avem origin/BRANCH dacă există
+          git fetch origin
+
+          if git show-ref --verify --quiet refs/remotes/origin/$BRANCH; then
+            git checkout $BRANCH
+            git pull --rebase origin $BRANCH
+          else
+            git checkout -b $BRANCH
+          fi
+
+          # copiem fișierele generate din workspace în branch-ul de output
+          # (fișierele sunt deja în working tree)
           git add JamesEdition_feed_${{ secrets.JE_DEALER_ID }}*.xml data/inventory.json
-
           git commit -m "Update feed XML + inventory" || echo "No changes"
 
-            - name: Pull & Push to current branch
-        run: |
-          set -e
-          git pull --rebase origin ${{ github.ref_name }}
-          git push origin HEAD:${{ github.ref_name }}
-
+          git push origin HEAD:$BRANCH
