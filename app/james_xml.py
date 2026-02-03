@@ -4,7 +4,6 @@ import uuid
 
 from .inventory import load_inventory, save_inventory, upsert_bat_cars, INVENTORY_PATH
 
-# importă din config valorile necesare
 from .config import (
     FEED_VERSION,
     FEED_REFERENCE,
@@ -15,7 +14,6 @@ from .config import (
 
 
 def _txt(val) -> str:
-    """Convertește în string și elimină None."""
     return "" if val is None else str(val)
 
 
@@ -26,31 +24,22 @@ def _add_text(parent, tag, text=""):
 
 
 def build_james_xml(items: list) -> bytes:
-    """
-    Construcție feed JamesEdition (Cars) conform ghidului.
-    """
     if not JE_DEALER_ID or not JE_DEALER_NAME:
         raise SystemExit("JE_DEALER_ID and JE_DEALER_NAME are required env vars.")
 
-    # DEBUG: câte item-uri primim de la scraper
     print("DEBUG build_james_xml received items:", len(items or []))
 
-    # --- STATEFUL INVENTORY (nu mai pierdem masinile intre rulări) ---
     inv = load_inventory()
     inv = upsert_bat_cars(inv, items or [])
     save_inventory(inv)
 
-    # DEBUG: confirmăm că s-a scris inventory
     print("DEBUG inventory path:", INVENTORY_PATH)
     print("DEBUG inventory size after upsert:", len(inv))
 
-    # Generăm feed-ul din TOT inventory-ul activ, nu doar din ce am găsit azi
     items = [x for x in inv.values() if x.get("status") == "active"]
 
-    # 1) root
     root = Element("jameslist_feed", {"version": _txt(FEED_VERSION or "3.0")})
 
-    # 2) feed_information
     fi = SubElement(root, "feed_information")
     _add_text(fi, "reference", FEED_REFERENCE or "BAT-unsold")
     _add_text(fi, "title", FEED_TITLE or "BaT Unsold importer")
@@ -59,21 +48,17 @@ def build_james_xml(items: list) -> bytes:
     _add_text(fi, "created", now)
     _add_text(fi, "updated", now)
 
-    # 3) dealer
     dealer = SubElement(root, "dealer")
     _add_text(dealer, "id", JE_DEALER_ID)
     _add_text(dealer, "name", JE_DEALER_NAME)
 
-    # 4) adverts
     adverts = SubElement(root, "adverts")
 
     for it in (items or []):
-        # asigură-te că avem dict pentru location
         loc_in = it.get("location") or {}
         if not isinstance(loc_in, dict):
             loc_in = {}
 
-        # reference STABIL
         ref = (
             it.get("external_id")
             or (f"BAT-{it.get('id')}" if it.get("id") else None)
@@ -81,38 +66,29 @@ def build_james_xml(items: list) -> bytes:
             or str(uuid.uuid4())
         )
 
-        adv = SubElement(adverts, "advert", {
-            "reference": _txt(ref),
-            "category": "car",
-        })
+        adv = SubElement(adverts, "advert", {"reference": _txt(ref), "category": "car"})
 
-        # required generic
         _add_text(adv, "preowned", "yes")
         _add_text(adv, "type", "sale")
 
-        # required core vehicle fields
         _add_text(adv, "brand", it.get("brand", ""))
         _add_text(adv, "model", it.get("model", ""))
         _add_text(adv, "year", it.get("year", ""))
 
-        # price block: POR=yes + <price .../> prezent chiar dacă gol
         _add_text(adv, "price_on_request", "yes")
         price = SubElement(adv, "price", {"currency": "USD", "vat_included": "VAT Excluded"})
         price.text = ""
 
-        # required location
         loc = SubElement(adv, "location")
         _add_text(loc, "country", loc_in.get("country", ""))
-        _add_text(loc, "region",  loc_in.get("region", ""))
-        _add_text(loc, "city",    loc_in.get("city", ""))
-        _add_text(loc, "zip",     loc_in.get("zip", ""))
+        _add_text(loc, "region", loc_in.get("region", ""))
+        _add_text(loc, "city", loc_in.get("city", ""))
+        _add_text(loc, "zip", loc_in.get("zip", ""))
         _add_text(loc, "address", loc_in.get("address", ""))
 
-        # headline + description
         _add_text(adv, "headline", it.get("title", ""))
         _add_text(adv, "description", it.get("description", ""))
 
-        # media images
         media = SubElement(adv, "media")
         for im in (it.get("images") or [])[:40]:
             img = SubElement(media, "image")
