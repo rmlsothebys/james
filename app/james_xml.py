@@ -94,4 +94,5 @@ def build_james_xml(items: list) -> bytes:
             img = SubElement(media, "image")
             _add_text(img, "image_url", im)
 
-    return tostring(root, encoding="utf-8")
+    xml_body = tostring(root, encoding="utf-8")
+return b'<?xml version="1.0" encoding="UTF-8"?>\n' + xml_body
