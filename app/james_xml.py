@@ -33,7 +33,8 @@ def build_james_xml(items: list) -> bytes:
     """
     if not JE_DEALER_ID or not JE_DEALER_NAME:
         raise SystemExit("JE_DEALER_ID and JE_DEALER_NAME are required env vars.")
-            # --- STATEFUL INVENTORY (nu mai pierdem masinile intre rulări) ---
+
+    # --- STATEFUL INVENTORY (nu mai pierdem masinile intre rulări) ---
     inv = load_inventory()
     inv = upsert_bat_cars(inv, items or [])
     save_inventory(inv)
