@@ -74,7 +74,9 @@ jobs:
 
           git commit -m "Update feed XML + inventory" || echo "No changes"
 
-      - name: Push to current branch
+            - name: Pull & Push to current branch
         run: |
           set -e
+          git pull --rebase origin ${{ github.ref_name }}
           git push origin HEAD:${{ github.ref_name }}
+
