@@ -61,24 +61,35 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - name: Push artifacts to generated-feed branch
+            - name: Push artifacts to generated-feed branch
         run: |
           set -e
           BRANCH="generated-feed"
+          OUTDIR=".out-feed"
 
-          # asigură că avem origin/BRANCH dacă există
+          # configurează git identity
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # asigură că avem origin
           git fetch origin
 
-          if git show-ref --verify --quiet refs/remotes/origin/$BRANCH; then
-            git checkout $BRANCH
-            git pull --rebase origin $BRANCH
+          # creează un worktree separat pentru branch-ul de output
+          rm -rf "$OUTDIR"
+          if git show-ref --verify --quiet "refs/remotes/origin/$BRANCH"; then
+            git worktree add "$OUTDIR" "origin/$BRANCH"
           else
-            git checkout -b $BRANCH
+            git worktree add -b "$BRANCH" "$OUTDIR"
           fi
 
-          # copiem fișierele generate din workspace în branch-ul de output
-          # (fișierele sunt deja în working tree)
-          git add JamesEdition_feed_${{ secrets.JE_DEALER_ID }}*.xml data/inventory.json
-          git commit -m "Update feed XML + inventory" || echo "No changes"
+          # copiem fișierele generate în worktree-ul de output
+          mkdir -p "$OUTDIR/data"
+          cp -f JamesEdition_feed_${{ secrets.JE_DEALER_ID }}*.xml "$OUTDIR/" || true
+          cp -f data/inventory.json "$OUTDIR/data/inventory.json" || true
 
+          # commit + push din worktree-ul de output
+          cd "$OUTDIR"
+          git add -A
+          git commit -m "Update feed XML + inventory" || echo "No changes"
           git push origin HEAD:$BRANCH
+
