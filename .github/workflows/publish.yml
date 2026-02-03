@@ -32,6 +32,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Install Playwright browsers
+        run: |
+          python -m playwright install --with-deps chromium
+
       - name: Build feed (makes the XML)
         env:
           JE_DEALER_ID: ${{ secrets.JE_DEALER_ID }}
@@ -65,12 +69,12 @@ jobs:
           head -c 200 data/inventory.json || true
           echo ""
 
-          # adaugă XML-ul generat (orice nume cu dealer_id) + inventory
+          # adaugă XML-ul generat + inventory
           git add JamesEdition_feed_${{ secrets.JE_DEALER_ID }}*.xml data/inventory.json
 
           git commit -m "Update feed XML + inventory" || echo "No changes"
 
-      - name: Push XML to current branch
+      - name: Push to current branch
         run: |
           set -e
           git push origin HEAD:${{ github.ref_name }}
