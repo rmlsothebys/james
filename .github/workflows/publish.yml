@@ -7,7 +7,7 @@ on:
     - cron: "11 0,6,12,18 * * *"
 
 permissions:
-  contents: write  # necesar ca să poată face commit/push
+  contents: write
 
 jobs:
   build:
@@ -16,8 +16,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0            # necesar pt commit & push
-          persist-credentials: true # folosește GITHUB_TOKEN
+          fetch-depth: 0
+          persist-credentials: true
 
       - name: Show branch (debug)
         run: echo "BRANCH=${{ github.ref_name }}"
@@ -48,6 +48,7 @@ jobs:
           set -e
           python -m app.main
           ls -l JamesEdition_feed_${{ secrets.JE_DEALER_ID }}*.xml
+          ls -l data/inventory.json || true
 
       - name: Configure Git for commit
         run: |
@@ -56,15 +57,18 @@ jobs:
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Commit XML + inventory to repo
-  run: |
-    git status --porcelain
-    ls -la data || true
-    echo "Inventory preview:"
-    head -c 200 data/inventory.json || true
-    echo ""
+        run: |
+          set -e
+          git status --porcelain
+          ls -la data || true
+          echo "Inventory preview:"
+          head -c 200 data/inventory.json || true
+          echo ""
 
-    git add JamesEdition_feed_105029.xml data/inventory.json
-    git commit -m "Update feed XML + inventory" || echo "No changes"
+          # adaugă XML-ul generat (orice nume cu dealer_id) + inventory
+          git add JamesEdition_feed_${{ secrets.JE_DEALER_ID }}*.xml data/inventory.json
+
+          git commit -m "Update feed XML + inventory" || echo "No changes"
 
       - name: Push XML to current branch
         run: |
