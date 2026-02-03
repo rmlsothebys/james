@@ -27,7 +27,11 @@ def _add_text(parent, tag, text=""):
 def _parse_year_brand_model(title: str):
     """
     Derivă (year, brand, model) din titlu.
-    Ex: "1969 Chevrolet Camaro ..." -> (1969, Chevrolet, Camaro)
+    Reguli:
+      - year = primul 19xx/20xx găsit
+      - brand = primul cuvânt după year
+      - model = RESTUL după brand (nu doar un cuvânt)
+      - dacă model iese gol -> model = brand (ca să nu pice la JE)
     """
     if not title:
         return ("", "", "")
@@ -35,18 +39,27 @@ def _parse_year_brand_model(title: str):
     m = re.search(r"\b(19\d{2}|20\d{2})\b", title)
     if not m:
         return ("", "", "")
+
     year = m.group(1)
-
     after = title[m.end():].strip()
+
     parts = re.split(r"\s+", after)
+    if not parts:
+        return (year, "", "")
 
-    brand = parts[0] if len(parts) >= 1 else ""
-    model = parts[1] if len(parts) >= 2 else ""
+    brand = parts[0].strip()
+    model = " ".join(parts[1:]).strip()  # <-- IMPORTANT: ia TOT restul
 
+    # curățare minimă (păstrează și '-' ca la Mercedes-Benz)
     brand = re.sub(r"[^A-Za-z0-9\-]+", "", brand)
-    model = re.sub(r"[^A-Za-z0-9\-]+", "", model)
+    model = re.sub(r"\s+", " ", model)
+
+    # dacă model e gol, îl setăm egal cu brand (JE cere obligatoriu)
+    if not model:
+        model = brand
 
     return (year, brand, model)
+
 
 
 def _reference_from_title(title: str) -> str:
@@ -111,14 +124,19 @@ def build_james_xml(items: list) -> bytes:
 
         # dacă lipsesc, derivă din titlu
         if not (year and brand and model):
-            y2, b2, m2 = _parse_year_brand_model(title)
-            year = year or y2
-            brand = brand or b2
-            model = model or m2
+    y2, b2, m2 = _parse_year_brand_model(title)
+    year = year or y2
+    brand = brand or b2
+    model = model or m2
 
-        # dacă tot lipsesc, sărim
-        if not (year and brand and model):
-            continue
+# safety net: JE nu acceptă model gol
+if brand and not model:
+    model = brand
+
+# dacă tot lipsește year sau brand, atunci sărim (dar model nu mai e gol)
+if not (year and brand):
+    continue
+
 
         # location
         loc_in = it.get("location") or {}
