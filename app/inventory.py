@@ -3,7 +3,8 @@ import json
 import os
 from datetime import datetime, timezone
 
-INVENTORY_PATH = "data/inventory.json"
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+INVENTORY_PATH = os.path.join(BASE_DIR, "data", "inventory.json")
 
 def _now_iso():
     return datetime.now(timezone.utc).isoformat()
