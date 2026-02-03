@@ -1,59 +1,134 @@
 import re
 import time
+import asyncio
 from urllib.parse import urljoin
+
 import requests
 from bs4 import BeautifulSoup
+from playwright.async_api import async_playwright
+
 from .config import USER_AGENT, BASE, UNSOLD_URL, MAX_LISTINGS, PAUSE_BETWEEN_REQUESTS
 
 HEADERS = {"User-Agent": USER_AGENT}
+
 
 def fetch(url):
     r = requests.get(url, headers=HEADERS, timeout=30)
     r.raise_for_status()
     return r.text
 
-def _extract_listing_links(html):
-    soup = BeautifulSoup(html, "lxml")
-    links = []
-    for a in soup.select('a[href*="/listing/"]'):
-        href = a.get("href")
-        if href and "/listing/" in href:
-            href = href.split("?")[0]
-            if href not in links:
-                links.append(href)
-    return links
 
-def _find_pagination_pages(html):
-    soup = BeautifulSoup(html, "lxml")
-    pages = set([UNSOLD_URL])
-    for a in soup.select("a"):
-        href = a.get("href")
-        if not href:
-            continue
-        if "auctions/results/" in href and "result=unsold" in href:
-            if href.startswith("http"):
-                pages.add(href.split("#")[0])
+def _uniq(seq):
+    seen = set()
+    out = []
+    for x in seq:
+        if x and x not in seen:
+            seen.add(x)
+            out.append(x)
+    return out
+
+
+async def _collect_listing_links_dynamic(target: int) -> list:
+    """
+    Colectează link-uri din "All Completed Auctions" prin "Show more"/scroll.
+    Folosește Playwright doar pentru results page (dinamic).
+    Returnează o listă de URL-uri absolute către /listing/...
+    """
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        page = await browser.new_page(
+            extra_http_headers={"User-Agent": USER_AGENT}
+        )
+
+        await page.goto(UNSOLD_URL, wait_until="domcontentloaded", timeout=45000)
+
+        urls = []
+        clicks = 0
+        max_clicks = 80  # suficient pentru 200-300 rezultate
+
+        while len(urls) < target and clicks < max_clicks:
+            hrefs = await page.eval_on_selector_all(
+                "a[href*='/listing/']",
+                "els => els.map(e => e.href)"
+            )
+
+            cleaned = []
+            for h in hrefs or []:
+                if not h:
+                    continue
+                h = h.split("#")[0].split("?")[0].rstrip("/")
+                if "/listing/" in h:
+                    cleaned.append(h)
+
+            urls = _uniq(urls + cleaned)
+
+            if len(urls) >= target:
+                break
+
+            # încearcă să apese butonul "Show More" (dacă există)
+            clicked = False
+            for sel in [
+                "text=Show More",
+                "text=Show more",
+                "button:has-text('Show More')",
+                "button:has-text('Show more')",
+                "button:has-text('Load More')",
+                "button:has-text('Load more')",
+            ]:
+                try:
+                    btn = page.locator(sel).first
+                    if await btn.count():
+                        await btn.scroll_into_view_if_needed()
+                        await btn.click(timeout=2000)
+                        clicked = True
+                        break
+                except Exception:
+                    pass
+
+            # fallback: scroll (declanșează loading)
+            if not clicked:
+                try:
+                    await page.mouse.wheel(0, 2500)
+                except Exception:
+                    pass
+
+            await page.wait_for_timeout(1200)
+            clicks += 1
+
+        await browser.close()
+
+        # uneori page dă relative; normalizează pe BASE
+        out = []
+        for u in urls[:target]:
+            if u.startswith("http"):
+                out.append(u)
             else:
-                pages.add(urljoin(BASE, href).split("#")[0])
-    return sorted(pages)
+                out.append(urljoin(BASE, u))
+        return out
+
 
 def parse_unsold_index():
-    first = fetch(UNSOLD_URL)
-    pages = _find_pagination_pages(first)
-    seen = []
-    for pg in pages:
-        try:
-            html = fetch(pg)
-            links = _extract_listing_links(html)
-            for u in links:
-                if u not in seen:
-                    seen.append(u)
-            if len(seen) >= MAX_LISTINGS:
-                break
-            time.sleep(PAUSE_BETWEEN_REQUESTS)
-        except Exception:
-            continue
-    return seen[:MAX_LISTINGS]
+    """
+    Returnează MAX_LISTINGS link-uri (200-300) din All Completed Auctions.
+    """
+    target = int(MAX_LISTINGS or 300)
+    try:
+        links = asyncio.run(_collect_listing_links_dynamic(target=target))
+        return links[:target]
+    except Exception:
+        # fallback: vechiul comportament (doar ce e în HTML static)
+        first = fetch(UNSOLD_URL)
+        soup = BeautifulSoup(first, "lxml")
+        links = []
+        for a in soup.select('a[href*="/listing/"]'):
+            href = a.get("href")
+            if href and "/listing/" in href:
+                href = href.split("?")[0]
+                href = urljoin(BASE, href)
+                if href not in links:
+                    links.append(href)
+        return links[:target]
+
 
 def parse_listing(url):
     html = fetch(url)
@@ -94,9 +169,7 @@ def parse_listing(url):
     if mt:
         transmission = mt.group(1).lower()
 
-    # -------------------
-    # extract location
-    # -------------------
+    # location
     location = {"country": "", "region": "", "city": "", "zip": "", "address": ""}
     loc_el = s.find(text=re.compile(r"Location:", re.I))
     if loc_el:
@@ -104,7 +177,6 @@ def parse_listing(url):
         mloc = re.search(r"Location:\s*(.+)", loc_text)
         if mloc:
             full_loc = mloc.group(1)
-            # crude split: "City, State ZIP" or "City, Country"
             parts = [p.strip() for p in re.split(r",|\n", full_loc) if p.strip()]
             if len(parts) == 1:
                 location["city"] = parts[0]
@@ -113,7 +185,6 @@ def parse_listing(url):
                 location["region"] = parts[1]
                 if len(parts) >= 3:
                     location["country"] = parts[2]
-    # -------------------
 
     imgs = []
     for img in s.select("img"):
@@ -138,6 +209,13 @@ def parse_listing(url):
         desc = s.get_text("\n", strip=True)
     desc = re.sub(r"\n{3,}", "\n\n", desc)[:3000]
 
+    # respectă pauza între request-uri dacă ai setat
+    if PAUSE_BETWEEN_REQUESTS:
+        try:
+            time.sleep(PAUSE_BETWEEN_REQUESTS)
+        except Exception:
+            pass
+
     return {
         "title": title,
         "brand": brand,
@@ -149,5 +227,5 @@ def parse_listing(url):
         "images": imgs,
         "url": url,
         "description": desc,
-        "location": location,  # nou!
+        "location": location,
     }
