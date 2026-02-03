@@ -1,7 +1,7 @@
 from xml.etree.ElementTree import Element, SubElement, tostring
 import datetime as dt
-import uuid
 import re
+import hashlib
 
 from .inventory import load_inventory, save_inventory, upsert_bat_cars
 from .config import (
@@ -21,13 +21,6 @@ def _add_text(parent, tag, text=""):
     return el
 
 def _parse_year_brand_model(title: str):
-    """
-    Derivă (year, brand, model) din titlu.
-    - year = primul 19xx/20xx
-    - brand = primul cuvânt după year
-    - model = restul după brand (poate avea spații)
-    - dacă model gol -> model = brand (JE cere model obligatoriu)
-    """
     if not title:
         return ("", "", "")
 
@@ -37,15 +30,12 @@ def _parse_year_brand_model(title: str):
 
     year = m.group(1)
     after = title[m.end():].strip()
-
     parts = re.split(r"\s+", after)
-    if not parts:
-        return (year, "", "")
 
-    brand = parts[0].strip()
-    model = " ".join(parts[1:]).strip()
+    brand = parts[0].strip() if len(parts) >= 1 else ""
+    model = " ".join(parts[1:]).strip() if len(parts) >= 2 else ""
 
-    # Curățare minimă
+    # curățare minimă
     brand = re.sub(r"[^A-Za-z0-9\-]+", "", brand)
     model = re.sub(r"\s+", " ", model)
 
@@ -54,16 +44,31 @@ def _parse_year_brand_model(title: str):
 
     return (year, brand, model)
 
+def _stable_ref(it: dict) -> str:
+    """
+    Reference unic & stabil, fără să conțină BAT/URL vizibil.
+    Folosim external_id din inventory (BAT-id sau URL) dar îl hash-uim.
+    """
+    seed = (
+        it.get("external_id")
+        or it.get("id")
+        or it.get("url")
+        or it.get("title")
+        or ""
+    )
+    h = hashlib.sha1(_txt(seed).encode("utf-8")).hexdigest()[:12]
+    return f"JE-{h}"
+
 def build_james_xml(items: list) -> bytes:
     if not JE_DEALER_ID or not JE_DEALER_NAME:
         raise SystemExit("JE_DEALER_ID and JE_DEALER_NAME are required env vars.")
 
-    # ---- STATEFUL INVENTORY ----
+    # --- STATEFUL INVENTORY ---
     inv = load_inventory()
     inv = upsert_bat_cars(inv, items or [])
     save_inventory(inv)
 
-    # Feed = tot inventory activ
+    # feed din tot inventory activ
     items = [x for x in inv.values() if x.get("status") == "active"]
 
     root = Element("jameslist_feed", {"version": _txt(FEED_VERSION or "3.0")})
@@ -85,7 +90,6 @@ def build_james_xml(items: list) -> bytes:
     for it in items:
         title = (it.get("title") or "").strip()
 
-        # year/brand/model: din item sau derivat din titlu
         year = _txt(it.get("year", "")).strip()
         brand = _txt(it.get("brand", "")).strip()
         model = _txt(it.get("model", "")).strip()
@@ -96,9 +100,9 @@ def build_james_xml(items: list) -> bytes:
             brand = brand or b2
             model = model or m2
 
-        # safety net: JE nu acceptă model gol
-        if brand and not model:
-            model = brand
+        # FINAL SAFETY NET: model nu are voie să fie gol
+        if not model:
+            model = brand or "Unknown"
 
         # dacă lipsesc year sau brand, sărim
         if not (year and brand):
@@ -115,12 +119,11 @@ def build_james_xml(items: list) -> bytes:
         zipc = loc_in.get("zip") or ""
         address = loc_in.get("address") or ""
 
-        # reference intern: doar titlul (cum ai cerut)
-        # ATENTIE: trebuie stabil; folosim external_id dacă există, dar NU îl punem vizibil.
-        # JE afișează "Internal reference" din attribute reference, deci îl facem din title.
-        ref = title or f"listing-{uuid.uuid4()}"
+        # reference stabil, unic, fără BAT în text
+        ref = _stable_ref(it)
 
-        adv = SubElement(adverts, "advert", {"reference": _txt(ref), "category": "car"})
+        adv = SubElement(adverts, "advert", {"reference": ref, "category": "car"})
+
         _add_text(adv, "preowned", "yes")
         _add_text(adv, "type", "sale")
 
