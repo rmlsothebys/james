@@ -15,7 +15,6 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout main
         uses: actions/checkout@v4
@@ -47,35 +46,50 @@ jobs:
         run: |
           set -e
           python -m app.main
+          ls -la
           ls -l JamesEdition_feed_${{ secrets.JE_DEALER_ID }}*.xml
           ls -l data/inventory.json
 
       - name: Push artifacts to generated-feed branch
+        env:
+          BRANCH: generated-feed
+          OUTDIR: .out-feed
         run: |
-          set -e
-
-          BRANCH="generated-feed"
-          OUTDIR=".out-feed"
+          set -euo pipefail
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git fetch origin
+          # Curățăm orice worktree rămas din rulari anterioare (safe)
+          rm -rf "$OUTDIR" || true
 
-          rm -rf "$OUTDIR"
+          # Asigură remote update
+          git fetch origin "+refs/heads/*:refs/remotes/origin/*"
 
+          # Creează worktree pe branch-ul de output
           if git show-ref --verify --quiet "refs/remotes/origin/$BRANCH"; then
             git worktree add "$OUTDIR" "origin/$BRANCH"
           else
             git worktree add -b "$BRANCH" "$OUTDIR"
           fi
 
+          # Copiază artefactele în worktree
           mkdir -p "$OUTDIR/data"
-
           cp -f JamesEdition_feed_${{ secrets.JE_DEALER_ID }}*.xml "$OUTDIR/"
           cp -f data/inventory.json "$OUTDIR/data/inventory.json"
 
+          # Commit & push în branch-ul de output
           cd "$OUTDIR"
           git add -A
-          git commit -m "Update feed XML + inventory" || echo "No changes"
-          git push origin HEAD:$BRANCH
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Update feed XML + inventory"
+            # Forțăm push doar pe generated-feed ca să evităm non-fast-forward (branch e doar output)
+            git push --force-with-lease origin HEAD:"$BRANCH"
+          fi
+
+          cd ..
+          # Curățăm worktree-ul după push (evită conflicte la următoarea rulare)
+          git worktree remove "$OUTDIR" --force || true
