@@ -1,4 +1,4 @@
 requests
 beautifulsoup4
 lxml
-playwright==1.49.1
+playwright
