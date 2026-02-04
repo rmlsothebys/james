@@ -7,9 +7,12 @@ import requests
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 
-from .config import USER_AGENT, BASE, UNSOLD_URL, MAX_LISTINGS, PAUSE_BETWEEN_REQUESTS
+from .config import USER_AGENT, BASE, MAX_LISTINGS, PAUSE_BETWEEN_REQUESTS
 
 HEADERS = {"User-Agent": USER_AGENT}
+
+# >>> AICI este pagina cerută de tine:
+AUCTIONS_URL = "https://bringatrailer.com/auctions/?sortby=bd"
 
 
 def fetch(url):
@@ -28,48 +31,57 @@ def _uniq(seq):
     return out
 
 
+def _normalize_listing_url(h: str) -> str:
+    if not h:
+        return ""
+    h = h.split("#")[0].split("?")[0].rstrip("/")
+    if "/listing/" not in h:
+        return ""
+    if h.startswith("http"):
+        return h
+    return urljoin(BASE, h)
+
+
 async def _collect_listing_links_dynamic(target: int) -> list:
     """
-    Colectează link-uri din "All Completed Auctions" prin "Show more"/scroll.
-    Folosește Playwright doar pentru results page (dinamic).
-    Returnează o listă de URL-uri absolute către /listing/...
+    Colectează link-uri de pe /auctions/?sortby=bd (dinamic JS).
+    Încercă scroll și butoane tip "Show more" dacă apar.
+    Returnează URL-uri absolute către /listing/...
     """
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
-        page = await browser.new_page(
-            extra_http_headers={"User-Agent": USER_AGENT}
-        )
+        page = await browser.new_page(extra_http_headers={"User-Agent": USER_AGENT})
 
-        await page.goto(UNSOLD_URL, wait_until="domcontentloaded", timeout=45000)
+        await page.goto(AUCTIONS_URL, wait_until="domcontentloaded", timeout=90000)
 
         urls = []
-        clicks = 0
-        max_clicks = 80  # suficient pentru 200-300 rezultate
+        max_steps = 120  # suficient pt 200-300 (depinde de câte încarcă per scroll)
+        steps = 0
 
-        while len(urls) < target and clicks < max_clicks:
+        while len(urls) < target and steps < max_steps:
+            # ia toate linkurile /listing/ din DOM
             hrefs = await page.eval_on_selector_all(
                 "a[href*='/listing/']",
-                "els => els.map(e => e.href)"
+                "els => els.map(e => e.getAttribute('href'))"
             )
 
             cleaned = []
             for h in hrefs or []:
-                if not h:
-                    continue
-                h = h.split("#")[0].split("?")[0].rstrip("/")
-                if "/listing/" in h:
-                    cleaned.append(h)
+                u = _normalize_listing_url(h)
+                if u:
+                    cleaned.append(u)
 
             urls = _uniq(urls + cleaned)
-
             if len(urls) >= target:
                 break
 
-            # încearcă să apese butonul "Show More" (dacă există)
+            # încearcă butoane "Show more / Load more" dacă există
             clicked = False
             for sel in [
                 "text=Show More",
                 "text=Show more",
+                "text=Load More",
+                "text=Load more",
                 "button:has-text('Show More')",
                 "button:has-text('Show more')",
                 "button:has-text('Load More')",
@@ -85,49 +97,49 @@ async def _collect_listing_links_dynamic(target: int) -> list:
                 except Exception:
                     pass
 
-            # fallback: scroll (declanșează loading)
+            # fallback: scroll down (declanșează încărcare)
             if not clicked:
                 try:
-                    await page.mouse.wheel(0, 2500)
+                    await page.mouse.wheel(0, 3000)
                 except Exception:
                     pass
 
             await page.wait_for_timeout(1200)
-            clicks += 1
+            steps += 1
 
         await browser.close()
-
-        # uneori page dă relative; normalizează pe BASE
-        out = []
-        for u in urls[:target]:
-            if u.startswith("http"):
-                out.append(u)
-            else:
-                out.append(urljoin(BASE, u))
-        return out
+        return urls[:target]
 
 
 def parse_unsold_index():
     """
-    Returnează MAX_LISTINGS link-uri (200-300) din All Completed Auctions.
+    Păstrăm numele funcției ca să nu modifici main.py.
+    DAR acum ia listările din AUCTIONS_URL (sortby=bd).
+    Returnează MAX_LISTINGS linkuri /listing/...
     """
     target = int(MAX_LISTINGS or 300)
+
+    # Playwright (dinamic)
     try:
         links = asyncio.run(_collect_listing_links_dynamic(target=target))
-        return links[:target]
+        if links:
+            return links[:target]
     except Exception:
-        # fallback: vechiul comportament (doar ce e în HTML static)
-        first = fetch(UNSOLD_URL)
-        soup = BeautifulSoup(first, "lxml")
+        pass
+
+    # Fallback (static) – uneori merge parțial
+    try:
+        html = fetch(AUCTIONS_URL)
+        soup = BeautifulSoup(html, "lxml")
         links = []
         for a in soup.select('a[href*="/listing/"]'):
             href = a.get("href")
-            if href and "/listing/" in href:
-                href = href.split("?")[0]
-                href = urljoin(BASE, href)
-                if href not in links:
-                    links.append(href)
+            u = _normalize_listing_url(href)
+            if u and u not in links:
+                links.append(u)
         return links[:target]
+    except Exception:
+        return []
 
 
 def parse_listing(url):
