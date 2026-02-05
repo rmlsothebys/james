@@ -87,23 +87,39 @@ def pick_images(soup: BeautifulSoup, max_images: int = MAX_IMAGES) -> list[str]:
 
 def build_xml(listings: list[dict]):
     feed = Element("feed", version="3.0")
+
     header = SubElement(feed, "header")
     SubElement(header, "dealer_id").text = DEALER_ID
     SubElement(header, "dealer_name").text = DEALER_NAME
 
-    items = SubElement(feed, "listings")
+    listings_el = SubElement(feed, "listings")
+
     for l in listings:
-        it = SubElement(items, "listing")
+        it = SubElement(listings_el, "listing")
+
         SubElement(it, "id").text = l["id"]
         SubElement(it, "title").text = l["title"]
         SubElement(it, "url").text = l["url"]
         SubElement(it, "description").text = l["description"]
-        SubElement(it, "price_on_request").text = "yes"
-        imgs_el = SubElement(it, "images")
-        for u in l["images"][:MAX_IMAGES]:
-            SubElement(imgs_el, "image").text = u
 
-    ElementTree(feed).write(OUTPUT_XML, encoding="utf-8", xml_declaration=True)
+        # REQUIRED BY JAMESEDITION
+        SubElement(it, "category").text = "cars"
+
+        location = SubElement(it, "location")
+        SubElement(location, "country").text = "US"
+
+        price = SubElement(it, "price")
+        SubElement(price, "price_on_request").text = "yes"
+
+        images = SubElement(it, "images")
+        for img in l["images"][:MAX_IMAGES]:
+            SubElement(images, "image").text = img
+
+    ElementTree(feed).write(
+        OUTPUT_XML,
+        encoding="utf-8",
+        xml_declaration=True
+    )
 
 def collect_listing_urls_with_browser() -> tuple[list[str], dict, str]:
     """
