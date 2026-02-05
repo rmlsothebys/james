@@ -177,4 +177,53 @@ def collect_listing_urls_with_browser() -> tuple[list[str], dict, str]:
     return sorted(seen), cookies_dict, user_agent
 
 def fetch_listing(session: requests.Session, url: str) -> dict:
-    r = session.get(url, timeout=REQUE
+    r = session.get(url, timeout=REQUEST_TIMEOUT_S)
+    if r.status_code != 200:
+        raise RuntimeError(f"HTTP {r.status_code}")
+
+    soup = BeautifulSoup(r.text, "html.parser")
+    h1 = soup.find("h1")
+    title = h1.get_text(" ", strip=True) if h1 else url
+    listing_id = url.rstrip("/").split("/")[-1]
+
+    description = pick_first_paragraphs(soup, max_paragraphs=2, max_chars=900)
+    images = pick_images(soup, max_images=MAX_IMAGES)
+
+    return {
+        "id": listing_id,
+        "title": title,
+        "url": url,
+        "description": description,
+        "images": images[:MAX_IMAGES],
+    }
+
+def main():
+    print("Opening real browser to collect ALL listing URLs…")
+    urls, cookies_dict, ua = collect_listing_urls_with_browser()
+    print(f"Found {len(urls)} listing URLs")
+
+    sess = requests.Session()
+    sess.headers.update({
+        "User-Agent": ua,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Connection": "keep-alive",
+        "Referer": "https://bringatrailer.com/",
+    })
+    sess.cookies.update(cookies_dict)
+
+    listings = []
+    for i, u in enumerate(urls, start=1):
+        try:
+            item = fetch_listing(sess, u)
+            listings.append(item)
+            print(f"[{i}/{len(urls)}] OK {item['id']} images={len(item['images'])}")
+        except Exception as e:
+            print(f"[{i}/{len(urls)}] SKIP {u} ({e})")
+        time.sleep(0.5)
+
+    build_xml(listings)
+    print(f"Done. Wrote {OUTPUT_XML} with {len(listings)} listings.")
+
+if __name__ == "__main__":
+    main()
