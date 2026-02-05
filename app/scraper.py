@@ -143,83 +143,159 @@ def parse_unsold_index():
 
 
 def parse_listing(url):
+    """
+    Parsează un listing BaT folosind DATE DIN PAGINĂ (nu din titlu):
+      - make / model: din blocul "Make ...", "Model ..."
+      - year: din primele propoziții ale descrierii (ex: "This 1989 ...")
+      - descriere: doar începutul (primele 1-2 paragrafe), ca summary pentru JE
+      - imagini: maxim 5 (preferăm cele mari / OG / JSON-LD)
+    """
     html = fetch(url)
     s = BeautifulSoup(html, "lxml")
 
+    # Title (îl păstrăm pentru output, dar NU îl folosim pentru year/make/model)
     title_el = s.find(["h1", "h2"])
     title = title_el.get_text(strip=True) if title_el else "Listing"
 
-    year = None
-    m = re.search(r"\b(19|20)\d{2}\b", title)
-    if m:
-        year = m.group(0)
+    # text “flattened” (util pentru regex-uri stabile pe site changes)
+    page_text = s.get_text("\n", strip=True)
 
-    brand = model = ""
-    if year and year in title:
-        after = title.split(year, 1)[1].strip(" -|")
-        parts = after.split()
-        if parts:
-            brand = parts[0]
-            model = " ".join(parts[1:]) or brand
+    def _first_match(rx: str) -> str:
+        m = re.search(rx, page_text, re.IGNORECASE)
+        return m.group(1).strip() if m else ""
+
+    # Make / Model (din blocul de sus al paginii)
+    brand = _first_match(r"\bMake\s+([^\n]+)")
+    model = _first_match(r"\bModel\s+([^\n]+)")
+
+    # Location (BaT afișează “Location Located in …”)
+    location = {"country": "", "region": "", "city": "", "zip": "", "address": ""}
+    loc_full = _first_match(r"\bLocation\s+Located\s+in\s+([^\n]+)")
+    if loc_full:
+        # de obicei: "United States" sau "City, State" etc
+        parts = [p.strip() for p in re.split(r",|\n", loc_full) if p.strip()]
+        if len(parts) == 1:
+            location["country"] = parts[0]
+        elif len(parts) == 2:
+            location["city"] = parts[0]
+            location["region"] = parts[1]
+        elif len(parts) >= 3:
+            location["city"] = parts[0]
+            location["region"] = parts[1]
+            location["country"] = parts[2]
+
+    # Descriere: primele 1-2 paragrafe “reale”
+    desc_paras = []
+    # candidate containers in order
+    containers = []
+    art = s.find("article")
+    if art:
+        containers.append(art)
+    main = s.find("main")
+    if main:
+        containers.append(main)
+    containers.append(s)
+
+    for c in containers:
+        for p in c.find_all("p"):
+            txt = p.get_text(" ", strip=True)
+            if not txt:
+                continue
+            # evităm texte de meniu, cookie etc.
+            if len(txt) < 40:
+                continue
+            # evită paragrafe despre “Verified Checkout”
+            if "Verified Checkout" in txt:
+                continue
+            desc_paras.append(txt)
+            if len(desc_paras) >= 2:
+                break
+        if desc_paras:
+            break
+
+    desc_summary = "\n\n".join(desc_paras).strip()
+    if not desc_summary:
+        # fallback: primele ~500 caractere din textul paginii
+        desc_summary = page_text[:500].strip()
+
+    # Year: din începutul descrierii (ex: "This 1989 ...")
+    year = ""
+    my = re.search(r"\bThis\s+(19\d{2}|20\d{2})\b", desc_summary)
+    if my:
+        year = my.group(1)
     else:
-        parts = title.split()
-        if parts:
-            brand = parts[0]
-            model = " ".join(parts[1:]) if len(parts) > 1 else ""
+        # fallback: primul an găsit în descriere (nu în titlu)
+        my2 = re.search(r"\b(19\d{2}|20\d{2})\b", desc_summary)
+        if my2:
+            year = my2.group(1)
 
+    # VIN / mileage / transmission: tot din conținut (dar nu “title”)
     vin = mileage = transmission = ""
     text_blobs = " ".join(el.get_text(" ", strip=True) for el in s.find_all(["p", "li", "span", "div"]))
-    mvin = re.search(r"\b[A-HJ-NPR-Z0-9]{11,17}\b", text_blobs)
+
+    # VIN explicit dacă apare ca “VIN: XXXXX”
+    mvin = re.search(r"\bVIN\b[:\s]*([A-HJ-NPR-Z0-9]{11,17})\b", text_blobs)
     if mvin:
-        vin = mvin.group(0)
+        vin = mvin.group(1)
+    else:
+        # fallback: orice token VIN-like (mai riscant)
+        mvin2 = re.search(r"\b[A-HJ-NPR-Z0-9]{11,17}\b", text_blobs)
+        if mvin2:
+            vin = mvin2.group(0)
 
     mm = re.search(r"(\d{1,3}(?:,\d{3})+|\d{1,6})\s*(miles|mi\.?|km)\b", text_blobs, re.I)
     if mm:
         mileage = mm.group(1).replace(",", "")
 
-    mt = re.search(r"\b(manual|automatic|semi-automatic|dual-clutch)\b", text_blobs, re.I)
+    mt = re.search(r"\b(manual|automatic|semi-automatic|dual-clutch|dct|cvt)\b", text_blobs, re.I)
     if mt:
         transmission = mt.group(1).lower()
 
-    # location
-    location = {"country": "", "region": "", "city": "", "zip": "", "address": ""}
-    loc_el = s.find(text=re.compile(r"Location:", re.I))
-    if loc_el:
-        loc_text = loc_el.strip()
-        mloc = re.search(r"Location:\s*(.+)", loc_text)
-        if mloc:
-            full_loc = mloc.group(1)
-            parts = [p.strip() for p in re.split(r",|\n", full_loc) if p.strip()]
-            if len(parts) == 1:
-                location["city"] = parts[0]
-            elif len(parts) >= 2:
-                location["city"] = parts[0]
-                location["region"] = parts[1]
-                if len(parts) >= 3:
-                    location["country"] = parts[2]
-
+    # Imagini: preferăm JSON-LD / OG, apoi fallback pe <img>
     imgs = []
-    for img in s.select("img"):
-        src = img.get("src") or img.get("data-src") or ""
-        if not src.startswith("http"):
-            continue
-        url_no_q = src.split("?", 1)[0].lower()
-        is_photo = url_no_q.endswith((".jpg", ".jpeg", ".webp"))
-        is_theme_asset = "/themes/" in url_no_q or url_no_q.endswith(".svg")
-        if is_photo and not is_theme_asset:
-            if "fit=144" in src or "resize=235" in src:
-                continue
-            if src not in imgs:
-                imgs.append(src)
-    imgs = imgs[:40]
 
-    desc = ""
-    body = s.find("article") or s.find("div", class_=re.compile("content|body", re.I))
-    if body:
-        desc = body.get_text("\n", strip=True)
-    if not desc:
-        desc = s.get_text("\n", strip=True)
-    desc = re.sub(r"\n{3,}", "\n\n", desc)[:3000]
+    # JSON-LD images
+    for tag in s.select('script[type="application/ld+json"]'):
+        try:
+            import json as _json
+            data = _json.loads(tag.get_text(strip=True))
+            if isinstance(data, dict):
+                im = data.get("image")
+                if isinstance(im, list):
+                    for u in im:
+                        if isinstance(u, str) and u.startswith("http"):
+                            if u not in imgs:
+                                imgs.append(u)
+        except Exception:
+            pass
+        if len(imgs) >= 5:
+            break
+
+    # OG image
+    if len(imgs) < 5:
+        og = s.select_one('meta[property="og:image"]')
+        if og and og.get("content"):
+            u = og["content"]
+            if u.startswith("http") and u not in imgs:
+                imgs.append(u)
+
+    # Fallback <img>
+    if len(imgs) < 5:
+        for img in s.select("img"):
+            src = img.get("src") or img.get("data-src") or ""
+            if not src.startswith("http"):
+                continue
+            url_no_q = src.split("?", 1)[0].lower()
+            is_photo = url_no_q.endswith((".jpg", ".jpeg", ".webp"))
+            is_theme_asset = "/themes/" in url_no_q or url_no_q.endswith(".svg")
+            if is_photo and not is_theme_asset:
+                # eliminăm thumbnails foarte mici
+                if "fit=144" in src or "resize=235" in src:
+                    continue
+                if src not in imgs:
+                    imgs.append(src)
+            if len(imgs) >= 5:
+                break
 
     # respectă pauza între request-uri dacă ai setat
     if PAUSE_BETWEEN_REQUESTS:
@@ -232,12 +308,12 @@ def parse_listing(url):
         "title": title,
         "brand": brand,
         "model": model,
-        "year": year or "",
+        "year": year,
         "vin": vin,
         "mileage": mileage,
         "transmission": transmission,
-        "images": imgs,
+        "images": imgs[:5],
         "url": url,
-        "description": desc,
+        "description": desc_summary,  # doar începutul descrierii
         "location": location,
     }

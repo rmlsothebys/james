@@ -111,8 +111,23 @@ def build_james_xml(items: list) -> bytes:
     adverts = SubElement(root, "adverts")
 
     for it in items:
+
         title = _txt(it.get("title"))
-        year, brand, model = _extract_brand_model_year(title)
+        raw = it.get("raw") or {}
+
+        # Preferăm câmpurile extrase din pagină (scraper.py),
+        # NU derivări din titlu.
+        year = _txt(raw.get("year"))
+        brand = _txt(raw.get("brand"))
+        model = _txt(raw.get("model"))
+
+        # fallback-uri (rar) – doar dacă pagina nu a livrat câmpurile
+        if not year or not brand or not model:
+            y2, b2, m2 = _extract_brand_model_year(title)
+            year = year or y2
+            brand = brand or b2
+            model = model or m2
+
         if not year:
             continue  # nu putem fără year
 
