@@ -1,29 +1,19 @@
-name: Publish JamesEdition Feed
+name: Generate JamesEdition Feed
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: "11 0,6,12,18 * * *"
-
-permissions:
-  contents: write
-
-concurrency:
-  group: publish-jamesedition-feed
-  cancel-in-progress: true
+    - cron: "0 */6 * * *"
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    steps:
-      - name: Checkout main
-        uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
-          persist-credentials: true
 
-      - name: Setup Python
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -33,63 +23,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Install Playwright browsers
-        run: |
-          python -m playwright install --with-deps chromium
-
-      - name: Build feed (scrape + XML)
+      - name: Run scraper
         env:
-          JE_DEALER_ID: ${{ secrets.JE_DEALER_ID }}
-          JE_DEALER_NAME: ${{ secrets.JE_DEALER_NAME }}
-          FEED_TITLE: ${{ secrets.FEED_TITLE }}
-          FEED_REFERENCE: ${{ secrets.FEED_REFERENCE }}
+          JE_DEALER_ID: "105029"
+          JE_DEALER_NAME: "RM Sotheby's"
         run: |
-          set -e
-          python -m app.main
-          ls -la
-          ls -l JamesEdition_feed_${{ secrets.JE_DEALER_ID }}*.xml
-          ls -l data/inventory.json
+          python app/main.py
 
-      - name: Push artifacts to generated-feed branch
-        env:
-          BRANCH: generated-feed
-          OUTDIR: .out-feed
+      - name: Commit and push feed
         run: |
-          set -euo pipefail
-
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          # Curățăm orice worktree rămas din rulari anterioare (safe)
-          rm -rf "$OUTDIR" || true
-
-          # Asigură remote update
-          git fetch origin "+refs/heads/*:refs/remotes/origin/*"
-
-          # Creează worktree pe branch-ul de output
-          if git show-ref --verify --quiet "refs/remotes/origin/$BRANCH"; then
-            git worktree add "$OUTDIR" "origin/$BRANCH"
-          else
-            git worktree add -b "$BRANCH" "$OUTDIR"
-          fi
-
-          # Copiază artefactele în worktree
-          mkdir -p "$OUTDIR/data"
-          cp -f JamesEdition_feed_${{ secrets.JE_DEALER_ID }}*.xml "$OUTDIR/"
-          cp -f data/inventory.json "$OUTDIR/data/inventory.json"
-
-          # Commit & push în branch-ul de output
-          cd "$OUTDIR"
-          git add -A
-
-          if git diff --cached --quiet; then
-            echo "No changes to commit."
-          else
-            git commit -m "Update feed XML + inventory"
-            # Forțăm push doar pe generated-feed ca să evităm non-fast-forward (branch e doar output)
-            git push --force-with-lease origin HEAD:"$BRANCH"
-          fi
-
-          cd ..
-          # Curățăm worktree-ul după push (evită conflicte la următoarea rulare)
-          git worktree remove "$OUTDIR" --force || true
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add *.xml data || true
+          git commit -m "Update JamesEdition feed" || echo "No changes"
+          git push
