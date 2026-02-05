@@ -1,34 +1,12 @@
-name: Generate JamesEdition Feed
+name: Auction Workflow (no scraper)
 
 on:
   workflow_dispatch:
 
 jobs:
-  build:
+  noop:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install deps
+      - name: Info
         run: |
-          pip install -r requirements.txt
-
-      - name: Remove old feed
-        run: |
-          rm -f JamesEdition_feed_105029.xml
-
-      - name: Run scraper
-        run: |
-          python app/main.py
-
-      - name: Commit new feed
-        run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          git add JamesEdition_feed_105029.xml
-          git commit -m "Force regenerate JamesEdition feed" || echo "No changes"
-          git push
+          echo "Scraper runs locally. Upload JamesEdition_feed_105029.xml to repo."
