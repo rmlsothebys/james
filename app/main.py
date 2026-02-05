@@ -121,6 +121,7 @@ def build_xml(listings: list[dict]):
         xml_declaration=True
     )
 
+
 def collect_listing_urls_with_browser() -> tuple[list[str], dict, str]:
     """
     Returns: (listing_urls, cookies_dict, user_agent)
